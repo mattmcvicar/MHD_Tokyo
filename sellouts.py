@@ -35,7 +35,7 @@ def Sellouts( artist ):
   discography = query_musicbrainz_artist( musicbrainz_ID )
 
   # 2a - print discography
-  print_discography( discography )
+  #print_discography( discography )
 
   # 3 - Retrieve audio features from echonest
   discography = query_echonest_features( echo_artist, echo_ID, discography )
@@ -208,7 +208,7 @@ def query_musicbrainz_artist( musicbrainz_ID ):
   for offset in [ '0', '25', '50', '75' ]:
 
     offset = '0'
-    
+
     query_url = musicbrainz_base_url + musicbrainz_ID + '&inc=recordings&status=official&type=album&limit=100&offset=' + offset
 
     #print query_url
@@ -435,6 +435,10 @@ def sellout_analysis( discography, artist ):
                                
   """
 
+  if discography == None and artist == None:
+
+  	return False
+  	
   feature_names = [ 'energy', 'liveness', 'tempo', 'speechiness',
                    'acousticness', 'duration',
                    'loudness', 'valence', 'danceability']
