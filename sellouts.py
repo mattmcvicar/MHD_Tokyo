@@ -1,3 +1,11 @@
+import json
+import urllib as url
+from xml.dom import minidom
+import unicodedata
+import time
+import numpy as np
+import matplotlib.pylab as plt
+
 # -----------
 # Main method
 # -----------
@@ -17,7 +25,7 @@ def Sellouts( artist ):
   
   # spit out query
   print ''
-  print '  Input Query: ' + artist 
+  print '  Input Query:     ' + artist 
 
   # 1 - Query the Echonest for this artist
   echo_artist, echo_ID, musicbrainz_ID = query_echonest_artist( artist )
@@ -25,22 +33,21 @@ def Sellouts( artist ):
   # 2 - Find this artist in musicbrainz
   discography = query_musicbrainz_artist( musicbrainz_ID )
 
+  # 2a - print discography
+  print_discography( discography )
+
   # 3 - Retrieve audio features from echonest
-  Features = query_echonest_features( echo_ID, discography )
+  discography = query_echonest_features( echo_artist, echo_ID, discography )
 
   # 4 - Conduct analysis
-  sellout_feature, sellout_index = sellout_analysis( Features, discography )
-
-  # 5 - Plot graph
-  plot_sellouts( Features, discography, 
-  	                  sellout_feature, sellout_index )
+  sellout_feature, sellout_index = sellout_analysis( discography, echo_artist )
 
   return None
 
 # ---------------------
 # Echonest artist query
 # ---------------------
-def query_echonest_artist( artist ):
+def query_echonest_artist( artist, DEBUG=False ):
 
   """
 
@@ -56,12 +63,116 @@ def query_echonest_artist( artist ):
 
   """
 
-  return None, None, None
+  # preliminaries
+  API_key = 'BI9JKSKATBNC3EYC4' 
+  
+  base_url = 'http://developer.echonest.com/api/v4/artist/search?api_key=' + API_key
+
+  # build the two query urls
+  echo_search_url = base_url + '&name=' + artist + '&format=json&results=1'
+
+  musicbrainz_query = base_url + '&name=' + artist + '&format=json&results=1&bucket=id:musicbrainz'
+
+  # print debug info
+  if DEBUG:
+
+    print '  searching for artist in The Echonest...'
+  
+  # retrieve url
+  response = json.loads( url.urlopen( echo_search_url ).read( ) )[ 'response' ]
+
+  # see if successful
+  success = response[ 'status' ][ 'message' ] == 'Success'
+
+  # if success
+  if success:
+
+    # see if anything returned
+    if response[ 'artists' ] != []:
+
+      # get echonest ID
+      echo_ID = response[ 'artists' ][ 0 ][ 'id' ]
+      
+      # and artist name
+      echo_name = response[ 'artists' ][ 0 ][ 'name' ]
+
+      # print
+      print '  Echonest artist: ' + echo_name
+
+      print '  Echonest ID:     ' + echo_ID 
+
+      # now try and get musicbrainz ID
+      musicbrainz_response = json.loads( url.urlopen( musicbrainz_query ).read( ) )[ 'response' ]
+
+      # success?
+      musicbrainz_success = response[ 'status' ][ 'message' ] == 'Success'
+
+      if musicbrainz_success:
+
+        # more than 0 results?
+        if musicbrainz_response[ 'artists' ][ 0 ][ 'foreign_ids' ] != []:
+
+          # get musicbrainz ID
+          musicbrainz_ID = musicbrainz_response[ 'artists' ][ 0 ][ 'foreign_ids' ][ 0 ][ 'foreign_id' ]
+
+          # it's formatted strangely
+          musicbrainz_ID = musicbrainz_ID.split('musicbrainz:artist:')[ -1 ]
+          
+          print '  MusicBrainz ID:  ' + musicbrainz_ID
+
+          return echo_name, echo_ID, musicbrainz_ID
+
+        else:
+
+          # couldn't retrieve the musicbrainz ID
+          print_echo_no_musicbrainz()
+
+      else:
+      
+        # no connection to the echonest
+        print_echo_noresponse()
+
+        return None, None, None	
+
+    else:
+
+      # query successful, but no artists returned
+      print_echo_no_artist()
+
+      return None, None, None
+
+  # else print error
+  else:
+
+    print_echo_noresponse()
+
+    return None, None, None
+
+def print_echo_noresponse( ):
+
+  print '  '
+  print '  !!ERROR!!'
+  print '  Could not retrieve result from the Echonest'
+  print '  '
+
+def print_echo_no_artist( ):
+
+  print '  '
+  print '  !!ERROR!!'
+  print '  Could not retrieve any matching artists from the Echonest'
+  print '  '
+
+def print_echo_no_musicbrainz():
+
+  print '  '
+  print '  !!ERROR!!'
+  print '  Could not retrieve the musicbrainz ID for this artist'
+  print '  '
 
 # ------------------------
 # Musicbrainz artist query
 # ------------------------
-def query_musicbrainz_artist( artist ):
+def query_musicbrainz_artist( musicbrainz_ID ):
 
   """
 
@@ -69,26 +180,131 @@ def query_musicbrainz_artist( artist ):
 
   Queries musicbrainz for an artist user query
 
-  Inputs: artist, string. Input musicbrainz ID
+  Inputs: musicbrainz_ID, string - Input musicbrainz ID
 
-  Outputs: discography, list -  discography of artist, with each
-                                element being a dictionary of songs,
-                                with the following keys:
+  Outputs: discography, list -     discography of artist, with each
+                                   element being a dictionary of songs,
+                                   with the following keys:
 
-                                 'album_name'    - name of album song appears on
-                                 'album_date'    - date of album release
-                                 'song_title'    - title of song
-                                 'track number'  - number it appears on
-                                                   album
+                                     'album_name'    - name of album song appears on
+                                     'album_date'    - date of album release
+                                     'song_title'    - title of song
+                                     'track number'  - number it appears on
+                                                       album
 
   """
 
-  return None
+  # check input
+  if musicbrainz_ID == None:
+
+  	return None
+
+  # Preliminaries
+  musicbrainz_base_url = 'http://musicbrainz.org/ws/2/release?artist='
+
+  # main storage
+  discography = dict()
+
+  # official albums only,
+  query_url = musicbrainz_base_url + musicbrainz_ID + '&inc=recordings&status=official&type=album'
+
+  # download xml
+  xml = minidom.parse( url.urlopen( query_url ) )
+
+  albums = xml.getElementsByTagName( 'release' )
+
+  for album in albums:
+
+    # must be US release?
+    release_country_xml = xml.getElementsByTagName('country')
+
+    release_country = get_country( release_country_xml )
+
+    # Get album title and song list data
+    album_title_data = album.getElementsByTagName( 'title' )
+  
+    # retrieve formatted titles from them
+    album_title, song_titles = get_album_title( album_title_data )
+
+    # Get album release date from xml
+    release_date_xml = album.getElementsByTagName( 'date' )
+ 
+    # format it
+    release_year = get_album_release_year( release_date_xml )
+
+    # collect
+    album_data = {
+                  'album_date': release_year,
+                 }
+
+    album_data[ 'tracks' ] = dict()
+
+
+    for track in song_titles:
+
+      album_data[ 'tracks' ][ track ] = dict()
+  	
+    # if not seen before, store
+    if album_title not in discography:
+  	
+      discography[ album_title ] = album_data
+      
+    else:
+
+      # if it precedes the existing data,
+      if release_year < discography[ album_title ][ 'album_date' ]:
+
+        # overwrite existing data
+        discography[ album_title ] = album_data  	
+
+  return discography
+
+def get_country( country_xml ):
+
+  return country_xml[ 0 ].toprettyxml().strip()[ len( '<country>' ) : -len( '</country>' ) ]
+
+def get_album_title( title_xml ):
+
+  # retrieve title
+  album_title = title_xml[ 0 ].toprettyxml().strip()[len('<title>'):-len('</title>')]
+
+  song_titles = [ t.toprettyxml().strip()[ len( '<title>' ) : -len( '</title>' ) ].encode('ascii','ignore').upper() for t in title_xml[ 1: ] ]
+  
+  return album_title.upper(), song_titles
+
+def get_album_release_year( release_date_xml ):
+
+  date = release_date_xml[ 0 ].toprettyxml().strip()[ len( '<date>' ) : -len( '</date>' ) ]	
+
+  if '-' in date:
+
+  	return int( date.split('-')[ 0 ] )
+
+  else:
+  
+    return int( date )	
+
+def print_discography( discography ):
+
+  # helper script for getting the right discography
+
+  print ''
+  for album, data in discography.items():
+
+    to_print = album + ', ' + str( data[ 'album_date' ] )
+    print '  ' + to_print
+    print '  ' + '-' * len( to_print )
+
+    for itrack, track in enumerate( data[ 'tracks' ] ):
+
+      print '  ' + str( itrack ) + ': ' + track	
+    
+    print '  '
 
 # -----------------------
 # Echonest audio features
 # -----------------------
-def query_echonest_features( artist_ID, discography ):
+def query_echonest_features( echo_artist, artist_ID, discography ):
 
   """
 
@@ -103,32 +319,77 @@ def query_echonest_features( artist_ID, discography ):
 
                                     query_musicbrainz_artist( artist )
 
-  Outputs: features, list       - list of features, one for every query
-                                  ( and in the same order ). Each element is 
-                                  either None ( no analysis available ), or a 
-                                  dictionary with the following fields, 
-                                  (which should be self-explanatory):
+  Outputs: features, list       - as returned by:
 
-                                    'time_signature'
-                                    'energy'
-                                    'liveness'
-                                    'tempo'
-                                    'speechiness'
-                                    'acousticness'
-                                    'mode'
-                                    'key'
-                                    'duration'
-                                    'loudness'
-                                    'valance'
+                                    query_echonest_features( artist_ID, discography )
 
   """
 
-  return None
+  # empty case
+  if artist_ID == None and discography == None:
+
+  	return None
+
+  # preliminaries
+  API_key = 'BI9JKSKATBNC3EYC4' 
+
+  song_search_url = 'http://developer.echonest.com/api/v4/song/search?api_key=' + API_key
+
+  song_analyse_url = 'http://developer.echonest.com/api/v4/song/profile?api_key=' + API_key
+
+  # first get all the songs in the echonest API by this artist
+  base_tracksearch_url = 'http://developer.echonest.com/api/v4/artist/songs?api_key=' + API_key
+
+  # form track search url
+  track_search_url = base_tracksearch_url + '&id=' + artist_ID + '&format=json&start=0&results=99'
+
+  # get response
+  echo_tracklist_response = json.loads( url.urlopen( track_search_url ).read( ) )[ 'response' ]
+
+  # format into a dictionary of titles and IDs
+  echo_song_IDs = dict()
+
+  for track in echo_tracklist_response[ 'songs' ]:
+
+  	echo_song_IDs[ track[ 'title' ].encode('ascii','ignore').upper() ] = track[ 'id' ] 
+
+  # Main loop
+  for album, data in discography.items():
+
+    for track in data[ 'tracks' ]:
+
+        if track in echo_song_IDs:
+
+          print '  Quering ' + track + '...'
+ 
+          # rate limit
+          #time.sleep( 0.5 )
+
+          song_ID = echo_song_IDs[ track ]
+
+          # hence get analysis URL
+          analysis_url = song_analyse_url + '&id=' + song_ID + '&bucket=audio_summary'
+
+          # read url
+          response = json.loads( url.urlopen( analysis_url ).read( ) )[ 'response' ]
+
+          if response[ 'status' ][ 'message' ] == 'Success':
+
+            if len( response[ 'songs' ] ) > 0:
+
+              audio_summary = response[ 'songs' ][ 0 ][ 'audio_summary' ]
+
+              # store
+              for key,attribute in audio_summary.items():
+
+                discography[ album ][ 'tracks' ][ track ][ key ] = attribute
+
+  return discography
 
 # ------------------------
 # Conduct sellout analysis
 # ------------------------
-def sellout_analysis( features, discography ):
+def sellout_analysis( discography, artist ):
 
   """
 
@@ -136,25 +397,7 @@ def sellout_analysis( features, discography ):
 
   Conducts 'sellout' analysis on audio features
 
-  Inputs:  features, list          -  list of features, one for every query
-                                      ( and in the same order ). Each element is 
-                                      either None ( no analysis available ), or a 
-                                      dictionary with the following fields, 
-                                      (which should be self-explanatory):
-
-                                        'time_signature'
-                                        'energy'
-                                        'liveness'
-                                        'tempo'
-                                        'speechiness'
-                                        'acousticness'
-                                        'mode'                                    
-                                        'key'
-                                        'duration'
-                                        'loudness'
-                                        'valance'
-
-           discography, list       -  discography of artist, with each
+  Inputs: discography, list        -  discography of artist, with each
                                       element being a dictionary of songs,
                                       with the following keys:
 
@@ -166,30 +409,148 @@ def sellout_analysis( features, discography ):
 
   Outputs: sellout_feature, string - which feature in features is indicative
                                      of an artist selling out
- 
-           sellout_type, string    - is the sellout a global maximum ( 'max' )
-                                     or minimum ( 'min' )?
 
               sellout_index, int   - index of selling out index (album)                       
                                
   """
 
+  feature_names = [ 'energy', 'liveness', 'tempo', 'speechiness',
+                   'acousticness', 'mode', 'time_signature', 'duration',
+                   'loudness', 'valence', 'danceability']
+
+  # are these features global maxes or mins for 
+  # 'hardcore' bands?
+  feature_max_mins = { 
+                       'energy':         'max',
+                       'liveness':       'max',
+                       'tempo':          'max',
+                       'speechiness':    'min',
+                       'acousticness':   'min',
+                       'mode':           'min',
+                       'time_signature': 'min',
+                       'duration':       'max',
+                       'loudness':       'max',
+                       'valence':        'min',
+                       'danceability':   'min'
+                      }
+
+  # collect median feature values for each album
+  for album, songs in discography.items():
+
+    # initialise
+    for f in feature_names:
+
+      discography[ album ][ f ] = []
+
+    for song, features in discography[ album ][ 'tracks' ].items():
+
+      if features != {}:
+
+        # and features
+        for f in feature_names:
+
+          discography[ album ][ f ].append( features[ f ] )    	
+       
+  # calculate the medians, standard deviations
+  n_features = len( feature_names )
+
+  n_albums = len( discography )
+
+
+  
+  for ifeat, feature in enumerate( feature_names ):
+
+    vals = []
+
+    album_dates = []
+
+    album_titles = []
+
+    for album, data in discography.items():
+
+      album_dates.append( data[ 'album_date' ] )
+
+      vals.append( np.median( discography[ album ][ feature ] ) )      
+  
+      album_titles.append( album )
+
+    # sort these vals by album date
+    sort_inds = np.argsort( album_dates )
+
+    vals = [ vals[ i ] for i in sort_inds ]
+
+    album_titles = [ album_titles[ i ] for i in sort_inds ]
+
+    # plot if monotonic max found
+    if feature_max_mins[ feature ] == 'max':
+
+      is_sellout, sellout_index = monotonic_max( vals )
+
+    else:
+
+      is_sellout, sellout_index = monotonic_min( vals )
+      	
+    if is_sellout:
+
+      # basic hbar
+      plt.barh( range( n_albums ),vals, align='center')
+
+      # xlabel = feature
+      plt.xlabel( feature )
+
+      # ylabel = album
+      plt.ylabel( 'Album' )
+
+      # yticks = album names
+      plt.yticks( range( len( album_titles ) ), album_titles )
+
+      # title text
+      sellout_album = album_titles[ sellout_index ]
+
+      title = artist + ' totally sold out after they recorded ' + sellout_album
+
+      plt.title( title )
+      
+      plt.tight_layout()
+
+      plt.show()
+      dffd
+ 
+  plt.show()
+  dsffds
+  
+  # Sort the albums by year
+  sort_inds = np.argsort( dates )    
+
   return None, None
 
-def plot_sellouts( Features, discography, 
-	                   sellout_feat, sellout_index ):
+def monotonic_max( feature ):
 
-  """
- 
-  plot_sellouts
+  max_val = max( feature )
 
-  Plot a graph showing how an artist has sold out
+  max_index = np.argmax( feature )
 
-  Inputs: Features  
+  left_less = all( np.diff( feature[ : max_index + 1 ] ) >= 0 )
 
-  """
+  right_less = all( np.diff( feature[ max_index :] ) <= 0 )
+  
+  mon_max = left_less and right_less
 
-  return None
+  return mon_max, max_index
+
+def monotonic_min( feature ):
+
+  max_val = min( feature )
+
+  min_index = np.argmin( feature )
+
+  left_more = all( np.diff( feature[ : min_index + 1 ] ) <= 0 )
+
+  right_more = all( np.diff( feature[ min_index :] ) >= 0 )
+  
+  mon_min = left_more and right_more
+
+  return mon_min, min_index
 
 # -----------
 # boilerplate
