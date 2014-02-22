@@ -5,6 +5,7 @@ import unicodedata
 import time
 import numpy as np
 import matplotlib.pylab as plt
+from matplotlib import cm
 
 # -----------
 # Main method
@@ -40,9 +41,7 @@ def Sellouts( artist ):
   discography = query_echonest_features( echo_artist, echo_ID, discography )
 
   # 4 - Conduct analysis
-  sellout_feature, sellout_index = sellout_analysis( discography, echo_artist )
-
-  return None
+  sellout_analysis( discography, echo_artist )
 
 # ---------------------
 # Echonest artist query
@@ -205,57 +204,65 @@ def query_musicbrainz_artist( musicbrainz_ID ):
   # main storage
   discography = dict()
 
-  # official albums only,
-  query_url = musicbrainz_base_url + musicbrainz_ID + '&inc=recordings&status=official&type=album'
+  # loop through pages 0-75
+  for offset in [ '0', '25', '50', '75' ]:
 
-  # download xml
-  xml = minidom.parse( url.urlopen( query_url ) )
+    query_url = musicbrainz_base_url + musicbrainz_ID + '&inc=recordings&status=official&type=album&limit=100&offset=' + offset
 
-  albums = xml.getElementsByTagName( 'release' )
+    #print query_url
 
-  for album in albums:
+    # download xml
+    xml = minidom.parse( url.urlopen( query_url ) )
 
-    # must be US release?
-    release_country_xml = xml.getElementsByTagName('country')
+    albums = xml.getElementsByTagName( 'release' )
 
-    release_country = get_country( release_country_xml )
+    for album in albums:
 
-    # Get album title and song list data
-    album_title_data = album.getElementsByTagName( 'title' )
+      # must be US release?
+      release_country_xml = xml.getElementsByTagName('country')
+
+      release_country = get_country( release_country_xml )
+
+      # Get album title and song list data
+      album_title_data = album.getElementsByTagName( 'title' )
   
-    # retrieve formatted titles from them
-    album_title, song_titles = get_album_title( album_title_data )
+      # retrieve formatted titles from them
+      album_title, song_titles = get_album_title( album_title_data )
 
-    # Get album release date from xml
-    release_date_xml = album.getElementsByTagName( 'date' )
+      # Get album release date from xml
+      release_date_xml = album.getElementsByTagName( 'date' )
  
-    # format it
-    release_year = get_album_release_year( release_date_xml )
+      # format it
+      if release_date_xml == []:
 
-    # collect
-    album_data = {
-                  'album_date': release_year,
-                 }
+      	continue
 
-    album_data[ 'tracks' ] = dict()
+      release_year = get_album_release_year( release_date_xml )
+
+      # collect
+      album_data = {
+                    'album_date': release_year,
+                   }
+
+      album_data[ 'tracks' ] = dict()
 
 
-    for track in song_titles:
+      for track in song_titles:
 
-      album_data[ 'tracks' ][ track ] = dict()
+        album_data[ 'tracks' ][ track ] = dict()
   	
-    # if not seen before, store
-    if album_title not in discography:
+      # if not seen before, store
+      if album_title not in discography:
   	
-      discography[ album_title ] = album_data
+        discography[ album_title ] = album_data
       
-    else:
+      else:
 
-      # if it precedes the existing data,
-      if release_year < discography[ album_title ][ 'album_date' ]:
+        # if it precedes the existing data,
+        if release_year < discography[ album_title ][ 'album_date' ]:
 
-        # overwrite existing data
-        discography[ album_title ] = album_data  	
+          # overwrite existing data
+          discography[ album_title ] = album_data  	
 
   return discography
 
@@ -354,14 +361,24 @@ def query_echonest_features( echo_artist, artist_ID, discography ):
   	echo_song_IDs[ track[ 'title' ].encode('ascii','ignore').upper() ] = track[ 'id' ] 
 
   # Main loop
+  n_musicbrainz = 0
+  n_echo = 0
+
+  print '  Grabbing Echonset summary for songs'
+  print '  -----------------------------------'
+
   for album, data in discography.items():
 
     for track in data[ 'tracks' ]:
 
+        n_musicbrainz = n_musicbrainz + 1
+
         if track in echo_song_IDs:
 
-          print '  Quering ' + track + '...'
- 
+          print '  ' + track
+
+          n_echo = n_echo + 1
+
           # rate limit
           #time.sleep( 0.5 )
 
@@ -384,6 +401,8 @@ def query_echonest_features( echo_artist, artist_ID, discography ):
 
                 discography[ album ][ 'tracks' ][ track ][ key ] = attribute
 
+  print ''
+  print '  found ' + str( n_echo ) + ' of ' + str( n_musicbrainz ) + ' MusicBrainz songs'
   return discography
 
 # ------------------------
@@ -415,7 +434,7 @@ def sellout_analysis( discography, artist ):
   """
 
   feature_names = [ 'energy', 'liveness', 'tempo', 'speechiness',
-                   'acousticness', 'mode', 'time_signature', 'duration',
+                   'acousticness', 'duration',
                    'loudness', 'valence', 'danceability']
 
   # are these features global maxes or mins for 
@@ -426,8 +445,6 @@ def sellout_analysis( discography, artist ):
                        'tempo':          'max',
                        'speechiness':    'min',
                        'acousticness':   'min',
-                       'mode':           'min',
-                       'time_signature': 'min',
                        'duration':       'max',
                        'loudness':       'max',
                        'valence':        'min',
@@ -481,6 +498,8 @@ def sellout_analysis( discography, artist ):
 
     album_titles = [ album_titles[ i ] for i in sort_inds ]
 
+    album_dates = [ album_dates[ i ] for i in sort_inds ]
+
     # plot if monotonic max found
     if feature_max_mins[ feature ] == 'max':
 
@@ -492,37 +511,72 @@ def sellout_analysis( discography, artist ):
       	
     if is_sellout:
 
-      # basic hbar
-      plt.barh( range( n_albums ),vals, align='center')
+      # plot
+      fig, ax = plt.subplots( 1 )
 
+      plt.barh( range( n_albums ),vals, align='center', 
+      	              color=cm.PuBu( 0.5 ), edgecolor=cm.PuBu( 0.9 ) )
+
+      fig.patch.set_facecolor('white')
+
+      # Remove all ticks
+      ax.xaxis.set_ticks_position('none')
+      ax.yaxis.set_ticks_position('none')
+      
+      # Remove spines
+      spines_to_remove = ['top', 'right']
+
+      for spine in spines_to_remove:
+
+        ax.spines[spine].set_visible( False )
+
+      # make lines almost black
+      almost_black = '#262626'
+
+      spines_to_keep = ['bottom', 'left']
+
+      for spine in spines_to_keep:
+
+        ax.spines[ spine ].set_linewidth( 0.5 )
+
+        ax.spines[ spine ].set_color( almost_black )
+
+      # tex font
+      plt.rc( 'text', usetex=True )
+      plt.rc( 'font', family='serif' )
+      
+      # sort out y limits
+      plt.ylim( [ -0.5, n_albums - 0.5 ] )
+      
       # xlabel = feature
-      plt.xlabel( feature )
-
-      # ylabel = album
-      plt.ylabel( 'Album' )
+      plt.xlabel( feature[ 0 ].upper() + feature[ 1 : ] )
 
       # yticks = album names
-      plt.yticks( range( len( album_titles ) ), album_titles )
+      titles_years = [ a[ 0 ] + a[ 1 : ].lower() + ' (' + str( album_dates[ ialbum ] ) + ')' for ialbum,a in enumerate( album_titles ) ]
+
+      plt.yticks( range( len( album_titles ) ), titles_years )
 
       # title text
       sellout_album = album_titles[ sellout_index ]
 
-      title = artist + ' totally sold out after they recorded ' + sellout_album
+      # make a goofy title
+      title = 'Scientific$^{*}$ proof that ' + artist + ' sold out after recording ' + sellout_album[ 0 ] + sellout_album[ 1 : ].lower()
+
+      # put a disclaimer
+      plt.text( 0, -1, '$^{*}$in no way scientific')
 
       plt.title( title )
-      
+
+      # tight layout
       plt.tight_layout()
 
-      plt.show()
-      dffd
- 
-  plt.show()
-  dsffds
-  
-  # Sort the albums by year
-  sort_inds = np.argsort( dates )    
+      # save
+      plt.savefig( artist + '.pdf')
 
-  return None, None
+      return None
+
+  print '  No results found '
+  return None
 
 def monotonic_max( feature ):
 
