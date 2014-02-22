@@ -41,7 +41,7 @@ def Sellouts( artist ):
   discography = query_echonest_features( echo_artist, echo_ID, discography )
 
   # 4 - Conduct analysis
-  sellout_analysis( discography, echo_artist )
+  success = sellout_analysis( discography, echo_artist )
 
 # ---------------------
 # Echonest artist query
@@ -207,6 +207,8 @@ def query_musicbrainz_artist( musicbrainz_ID ):
   # loop through pages 0-75
   for offset in [ '0', '25', '50', '75' ]:
 
+    offset = '0'
+    
     query_url = musicbrainz_base_url + musicbrainz_ID + '&inc=recordings&status=official&type=album&limit=100&offset=' + offset
 
     #print query_url
@@ -473,8 +475,6 @@ def sellout_analysis( discography, artist ):
 
   n_albums = len( discography )
 
-
-  
   for ifeat, feature in enumerate( feature_names ):
 
     vals = []
@@ -573,10 +573,10 @@ def sellout_analysis( discography, artist ):
       # save
       plt.savefig( artist + '.pdf')
 
-      return None
+      return True
 
   print '  No results found '
-  return None
+  return False
 
 def monotonic_max( feature ):
 
