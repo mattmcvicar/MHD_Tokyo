@@ -366,6 +366,7 @@ def query_echonest_features( echo_artist, artist_ID, discography ):
   n_musicbrainz = 0
   n_echo = 0
 
+  print ''
   print '  Grabbing Echonset summary for songs'
   print '  -----------------------------------'
 
@@ -438,21 +439,37 @@ def sellout_analysis( discography, artist ):
   if discography == None and artist == None:
 
   	return False
-  	
-  feature_names = [ 'energy', 'liveness', 'tempo', 'speechiness',
-                   'acousticness', 'duration',
-                   'loudness', 'valence', 'danceability']
+
+  # first klll off any albums which have no data
+  # discography = dict()
+
+  # for album in raw_discography:
+
+  #   skipit = all( [ item == {} for key, item in raw_discography['SIX HITS']['tracks'].items() ] )
+  
+  #   if skipit:
+
+  #     pass
+
+  #   else:
+      
+  #     discography[ album ] = raw_discography[ album ]
+
+  # for album, songs in raw_discography.items():
+
+  #   if raw_discography[ album ]  	
+
+  feature_names = [ 'energy', 'liveness', 'speechiness',
+                   'acousticness',
+                   'valence', 'danceability']
 
   # are these features global maxes or mins for 
   # 'hardcore' bands?
   feature_max_mins = { 
                        'energy':         'max',
                        'liveness':       'max',
-                       'tempo':          'max',
                        'speechiness':    'min',
                        'acousticness':   'min',
-                       'duration':       'max',
-                       'loudness':       'max',
                        'valence':        'min',
                        'danceability':   'min'
                       }
@@ -479,6 +496,12 @@ def sellout_analysis( discography, artist ):
 
   n_albums = len( discography )
 
+  # keep track of best stuff
+  best_score = -np.inf
+  best_vals = None
+  best_feature = None
+  best_sellout_index = None
+
   for ifeat, feature in enumerate( feature_names ):
 
     vals = []
@@ -504,83 +527,93 @@ def sellout_analysis( discography, artist ):
 
     album_dates = [ album_dates[ i ] for i in sort_inds ]
 
+    print vals, feature
+
     # plot if monotonic max found
     if feature_max_mins[ feature ] == 'max':
 
-      is_sellout, sellout_index = monotonic_max( vals )
+      score, sellout_index = score_max( vals )
 
     else:
 
-      is_sellout, sellout_index = monotonic_min( vals )
+      score, sellout_index = score_min( vals )
       	
-    if is_sellout:
+    if score > best_score:
 
-      # plot
-      fig, ax = plt.subplots( 1 )
+      best_score = -np.inf
+      best_vals = vals
+      best_feature = feature
+      best_sellout_index = sellout_index
 
-      plt.barh( range( n_albums ),vals, align='center', 
+  # plot
+  fig, ax = plt.subplots( 1 )
+
+  plt.barh( range( n_albums ),vals, align='center', 
       	              color=cm.PuBu( 0.5 ), edgecolor=cm.PuBu( 0.9 ) )
 
-      fig.patch.set_facecolor('white')
+  fig.patch.set_facecolor('white')
 
-      # Remove all ticks
-      ax.xaxis.set_ticks_position('none')
-      ax.yaxis.set_ticks_position('none')
+  # Remove all ticks
+  ax.xaxis.set_ticks_position('none')
+  ax.yaxis.set_ticks_position('none')
       
-      # Remove spines
-      spines_to_remove = ['top', 'right']
+  # Remove spines
+  spines_to_remove = ['top', 'right']
 
-      for spine in spines_to_remove:
+  for spine in spines_to_remove:
 
-        ax.spines[spine].set_visible( False )
+    ax.spines[spine].set_visible( False )
 
-      # make lines almost black
-      almost_black = '#262626'
+    # make lines almost black
+    almost_black = '#262626'
 
-      spines_to_keep = ['bottom', 'left']
+    spines_to_keep = ['bottom', 'left']
 
-      for spine in spines_to_keep:
+    for spine in spines_to_keep:
 
-        ax.spines[ spine ].set_linewidth( 0.5 )
+      ax.spines[ spine ].set_linewidth( 0.5 )
 
-        ax.spines[ spine ].set_color( almost_black )
+      ax.spines[ spine ].set_color( almost_black )
 
-      # tex font
-      plt.rc( 'text', usetex=True )
-      plt.rc( 'font', family='serif' )
+    # tex font
+    plt.rc( 'text', usetex=True )
+    plt.rc( 'font', family='serif' )
       
-      # sort out y limits
-      plt.ylim( [ -0.5, n_albums - 0.5 ] )
+    # sort out y limits
+    plt.ylim( [ -0.5, n_albums - 0.5 ] )
       
-      # xlabel = feature
-      plt.xlabel( feature[ 0 ].upper() + feature[ 1 : ] )
+    # xlabel = feature
+    plt.xlabel( feature[ 0 ].upper() + feature[ 1 : ] )
 
-      # yticks = album names
-      titles_years = [ a[ 0 ] + a[ 1 : ].lower() + ' (' + str( album_dates[ ialbum ] ) + ')' for ialbum,a in enumerate( album_titles ) ]
+    # yticks = album names
+    titles_years = [ a[ 0 ] + a[ 1 : ].lower() + ' (' + str( album_dates[ ialbum ] ) + ')' for ialbum,a in enumerate( album_titles ) ]
 
-      plt.yticks( range( len( album_titles ) ), titles_years )
+    plt.yticks( range( len( album_titles ) ), titles_years )
 
-      # title text
-      sellout_album = album_titles[ sellout_index ]
+    # title text
+    sellout_album = album_titles[ sellout_index ]
 
-      # make a goofy title
-      title = 'Scientific$^{*}$ proof that ' + artist + ' sold out after recording ' + sellout_album[ 0 ] + sellout_album[ 1 : ].lower()
+    # make a goofy title
+    title = 'Scientific$^{*}$ proof that ' + artist + ' sold out after recording ' + sellout_album[ 0 ] + sellout_album[ 1 : ].lower()
 
-      # put a disclaimer
-      plt.text( 0, -1, '$^{*}$in no way scientific')
+    # put a disclaimer
+    plt.text( 0, -1, '$^{*}$in no way scientific')
 
-      plt.title( title )
+    plt.title( title )
 
-      # tight layout
-      plt.tight_layout()
+    # tight layout
+    plt.tight_layout()
 
-      # save
-      plt.savefig( artist + '.pdf')
+    # save
+    plt.savefig( artist + '.pdf')
 
-      return True
+def score_max( feature ):
 
-  print '  No results found '
-  return False
+  return np.abs( max( feature ) - min( feature ) ), np.argmax( feature )
+
+def score_min( feature ):
+
+  return np.abs( max( feature ) - min( feature ) ), np.argmin( feature )  
 
 def monotonic_max( feature ):
 
